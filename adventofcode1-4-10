@@ -1,0 +1,412 @@
+; Richard Nygord 11/14/2017
+; https://adventofcode.com/2016/
+
+; extraneous Nightcode stuff
+(ns adventofclojure.clj.core
+  (:gen-class))
+
+
+; Richard Nygord 3/5/2018
+; https://adventofcode.com/2016/day/1
+
+(require '[clojure.string :as str])
+(require '[clojure.test :as test])
+
+
+; constructor for a position on the city street grid - x, y, dir - where dir is a vector for the heading - [x y]
+(defn newPos 
+  ([x y] {:x x :y y :dir [0 1]})    ; no direction will default to north/up vector
+  ([x y d] {:x x :y y :dir d}))
+
+
+(defn mult[[a b][c d]]              ; vector multiply
+  [(- (* a c) (* d b)) (+ (* a d) (* c b))])
+
+(defn move-by [[x y] [dx dy] n]
+  [(+ x (* dx n)) (+ y (* dy n))])
+
+
+(defn movePos [pos turn blks]
+  (let [p [(:x pos) (:y pos)]
+        d (mult (:dir pos)                       ; mult pos dir vector by
+                (if (= turn \L) [0 1] [0 -1]))   ; left or right turn vector
+        q (move-by p d blks)]
+    (newPos (q 0) (q 1) d)))
+
+
+(defn my-abs [x]
+  (if (< x 0) (- x) x))
+
+(defn dist [p1 p2]
+  (+ (my-abs (- (:x p1) (:x p2)))
+     (my-abs (- (:y p1) (:y p2)))))
+
+(defn move [pos inst]
+  (let [m (re-matches #"([RL])(\d+)" inst)
+        [_ [dir _] blks] m]
+    (movePos pos dir (read-string blks))))
+
+(defn followFrom [pos inds]
+  (if (empty? inds) 
+    pos
+    (let [nextPos (move pos (first inds))]
+      (recur nextPos (rest inds)))))
+
+(defn inside-dim [line p dim]
+   (let [[p1 p2] line
+         {d1 dim} p1
+         {d2 dim} p2]
+    (and (>= p (min d1 d2))
+         (<= p (max d1 d2)))))
+
+(defn in-dim [line dim]
+   (let [[p1 p2] line
+         {d1 dim} p1
+         {d2 dim} p2]
+     (if (= d1 d2) d1 false)))
+
+(defn horiz [line]
+  (in-dim line :y))
+
+(defn vert [line]
+   (in-dim line :x))
+
+(defn closest-to-old [dim new old]   ; one dim closest
+ (let [[p1 p2] new
+       {a dim} p1
+       {b dim} p2
+       [p3 p4] old
+       {c dim} p3
+       {d dim} p4
+       inter (and (>= (max a b) (min c d)) (<= (min a b) (max c d)))]
+   (if inter
+     (if (>= a (max c d)) 
+       (max c d) 
+       (min c d))
+     nil)))
+     
+
+(defn perp-inter [l1 l2]   ; perpendicular intersection
+  (if-let [x (vert l1)]
+    (let [y (:y (first l2))]
+      (if (and (inside-dim l1 y :y)
+               (inside-dim l2 x :x))
+        (newPos x y)
+        nil))
+    (let [x (:x (first l2))
+          y (:y (first l1))]
+      (if (and (inside-dim l1 x :x)
+               (inside-dim l2 y :y))
+        (newPos x y)
+        nil))))
+   
+
+(defn intersection [line2 line1]
+  (if-let [y1 (horiz line1)]
+    (if-let [y2 (horiz line2)]
+      (if (= y1 y2)
+        (if-let [x (closest-to-old :x line2 line1)]
+          (newPos x y1)
+          nil)
+        nil)
+      (perp-inter line1 line2))
+    (let [x1 (:x (first line1))]
+      (if-let [x2 (vert line2)]
+        (if (= x1 x2)
+          (if-let [y (closest-to-old :y line2 line1)]
+            (newPos x1 y)
+            nil)
+          nil)
+        (perp-inter line1 line2)))))
+
+
+(defn intersections [leg path]
+  (remove nil? (map (partial intersection leg) path)))
+  
+
+(defn closest-order [pos inters]
+  (first (sort-by (partial dist pos) inters)))
+
+
+(defn followSaving [pos inds path]
+  (if (empty? inds)
+    path
+    (let [nextPos (move pos (first inds))
+          newPath (conj path [pos nextPos])]
+        (recur nextPos (rest inds) newPath))))
+  
+(defn make-path [dirs]
+  (let [inds (map str/trim (str/split dirs #","))
+        startPos (newPos 0 0)]
+    (followSaving startPos inds [])))
+
+(defn findCross [path]
+  (let [oldPath (butlast (butlast path))
+        nextLeg (last path)
+        crosses (intersections nextLeg oldPath)]
+    crosses)) 
+
+(defn followChecking [pos inds path]
+  (if (empty? inds) 
+    nil
+    (let [nextPos (move pos (first inds))
+          nextLeg [pos nextPos]
+          crosses (intersections nextLeg (butlast path))]
+      (if (not-empty crosses) 
+        (closest-order pos crosses)
+        (recur nextPos (rest inds) (conj path nextLeg))))))
+
+
+; part 1 solution
+
+(defn dirs-distance [dirs]
+  (let [inds (map str/trim (str/split dirs #","))
+        startPos (newPos 0 0)
+        finalPos (followFrom startPos inds)]
+    (dist startPos finalPos)))
+
+; part 2 solution
+
+(defn cross-distance [dirs]
+  (let [inds (map str/trim (str/split dirs #","))
+        startPos (newPos 0 0)
+        crossPos (followChecking startPos inds [])]
+    (if (not-empty crossPos)
+      (dist startPos crossPos)
+      nil)))
+
+
+(test/is (= (dirs-distance " R2 , L3  ") 5))
+(test/is (= (dirs-distance " R2 , R2,R2 ") 2))
+(test/is (= (dirs-distance "R5,L5,R5,R3") 12))
+
+
+(cross-distance "R5,L500000000000000002,R5,R100000000000000000,R20")
+(test/is (= 400000000000000007 (cross-distance "R5,L500000000000000002,R5,R100000000000000000,R20")))
+
+(cross-distance "R5,L50000000000000002,R5,R10000000000000000,R20")
+(test/is (= 40000000000000007 (cross-distance "R5,L50000000000000002,R5,R10000000000000000,R20")))
+
+(cross-distance "R5,L5000000000000002,R5,R1000000000000000,R20")
+(test/is (= 4000000000000007 (cross-distance "R5,L5000000000000002,R5,R1000000000000000,R20")))
+
+(cross-distance "R5,L50002,R5,R10000,R20")
+(test/is (= 40007 (cross-distance "R5,L50002,R5,R10000,R20")))
+
+(cross-distance "R5,L52,R5,R10,R20")
+(test/is (= 47 (cross-distance "R5,L52,R5,R10,R20")))
+
+(test/is (= 3 (dirs-distance  "R2,L5,R2,R3,L2,L2,R1,R1,R7")))
+(test/is (= 9 (cross-distance "R2,L5,R2,R3,L2,L2,R1,R1,R7")))
+(test/is (= 7 (cross-distance "R5,L500000002,R5,R500000000,R6")))
+(test/is (= 6  (cross-distance "R5,L500000000000000002,R5,R500000000000000000,L5,L90000000000000,R5,R90000000000001,R60")))
+(test/is (= 5  (cross-distance "R5,L500000000000000002,R5,R500000000000000000,L5,L90000000000000,R5,R90000000000002,R60")))
+
+(cross-distance "R5,L500000000000000002,R5,R500000000000000000,L5,L90000000000000,R5,R80000000000001,R60")
+(test/is (= 10000000000016 (cross-distance "R5,L500000000000000002,R5,R500000000000000000,L5,L90000000000000,R5,R80000000000001,R60")))
+
+(cross-distance "R5,L1234000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000567,R3,R1234000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000564,R9")
+
+(test/is (= 8 (cross-distance "R5,L1234000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000567,R3,R1234000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000564,R9")))
+
+
+(cross-distance "R5,L1234000000000000000000000000000000000000000000543210000000000000000000000000000000000000000000000567,R3,
+                     R234000000000000000000000000000000000000000000543210000000000000000000000000000000000000000000000564,R9")
+
+(test/is (=                      1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008 
+            (cross-distance "R5,L1234000000000000000000000000000000000000000000543210000000000000000000000000000000000000000000000567,R3,
+                                 R234000000000000000000000000000000000000000000543210000000000000000000000000000000000000000000000564,R9")))
+
+(test/is (=    1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003
+            (- 1234000000000000000000000000000000000000000000543210000000000000000000000000000000000000000000000567
+                234000000000000000000000000000000000000000000543210000000000000000000000000000000000000000000000564)))
+
+(test/is (=                      1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008 
+            (cross-distance "L5,L1234000000000000000000000000000000000000000000543210000000000000000000000000000000000000000000000567,R3,
+                                 R234000000000000000000000000000000000000000000543210000000000000000000000000000000000000000000000564,R9")))
+
+
+(test/is (= nil(cross-distance "R5,L5,R5,R3")))
+(test/is (= 7  (cross-distance "R5,L5,R5,R3,R6")))    ; should be 5,2
+(test/is (= 10 (cross-distance "R5,L5,R2,L4,L2,L4"))) ; should be 5,5
+(test/is (= 5  (cross-distance "R5,L5,R2,R7,R2,R4"))) ; should be 5,0
+(test/is (= 13 (cross-distance "R5,L5,R5,R3,R2,R4"))) ; should be 8,5
+
+
+
+
+(defn readFile [file]
+  (with-open [rdr (clojure.java.io/reader file)]
+    (doseq [line (line-seq rdr)]                  
+      (println line " => " (dirs-distance line)))))
+
+;(readFile "/home/rich/code/adventofclojure.clj/src/adventofclojure/clj/Day1input.txt")
+
+
+
+
+
+
+
+
+
+
+; Richard Nygord 11/14/2017
+; https://adventofcode.com/2016/day/4
+
+(ns adventofclojure.clj.core
+  (:gen-class))
+
+(require '[clojure.string :as str])
+(require '[clojure.test :as test])
+
+(defn real-room? [r]
+  (let [sp (str/split r #"-")
+        id (last sp)
+        sp (pop sp)
+        sorted (sort-by second > (into (sorted-map) (frequencies (str/join sp))))
+        coded (apply str (map first (take 5 sorted)))
+        m (re-matcher #"(\d+)\[([a-z]+)" id)
+        sec-sum (zipmap [:sec :sum] (rest (re-find m)))]
+        
+    [(= (:sum sec-sum) coded) (read-string (:sec sec-sum))]))
+
+(test/is (= (real-room? "aaaaa-bbb-z-y-x-123[abxyz]") '[true 123]))
+(test/is (= (real-room? "a-b-c-d-e-f-g-h-987[abcde]") '[true 987]))
+(test/is (= (real-room? "not-a-real-room-404[oarel]") '[true 404]))
+(test/is (= (real-room? "totally-real-room-200[decoy]") '[false 200]))
+
+(def rs ["aaaaa-bbb-z-y-x-123[abxyz]"
+         "a-b-c-d-e-f-g-h-987[abcde]"
+         "not-a-real-room-404[oarel]"
+         "totally-real-room-200[decoy]"])
+
+(defn total-real-rooms [rs]
+  (reduce + 
+    (map (fn [r] 
+           (let [[is-real sec-id] (real-room? r)] 
+             (if is-real sec-id 0))) rs)))
+
+(test/is (= (total-real-rooms rs) 1514))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+; Richard Nygord 11/16/2017
+; https://adventofcode.com/2016/day/10
+
+(ns adventofclojure.clj.core
+  (:gen-class))
+
+(require '[clojure.string :as str])
+(require '[clojure.test :as test])
+
+
+(def inp-ex
+  "value 5 goes to bot 2
+  bot 2 gives low to bot 1 and high to bot 0
+  value 3 goes to bot 1
+  bot 1 gives low to output 1 and high to bot 0
+  bot 0 gives low to output 2 and high to output 0
+  value 2 goes to bot 2
+  ")
+
+(def inp-file "/home/rich/code/adventofcodeday10/src/adventofcodeday10/Day10Exaple.txt")
+(spit inp-file inp-ex)
+
+
+(def inp (slurp inp-file))
+
+(def lns (map str/trim (str/split-lines inp)))
+
+
+(defn give! [col id val]
+  (let [vs (col id)]
+    (swap! vs conj val)))
+
+
+(defn make-bot [id destL idL destH idH]
+  (fn [bs os]
+    (let [ol (if (= destL "bot") bs os)
+          oh (if (= destH "bot") bs os)
+          vs (sort @(bs id))]
+      (if (= (count vs) 2)
+        (dosync (give! ol idL (first vs))
+                (give! oh idH (second vs))
+                (swap! (bs id) empty)
+                (if (= vs '[2 5]) id true))     ; for exapmple
+                ;(if (= vs '[17 61]) id true))  ; for actual
+        false))))
+
+
+(defn init-vals [a n]
+  (if (= n 0) a
+    (recur (conj a (atom [])) (dec n))))
+
+
+(defn parse-val [ln]
+  (let [[m val bot] (re-find #"^\s*value (\d+)[^\d]*(\d+)" ln)]
+    (if m
+      [(read-string bot) (read-string val)])))
+
+
+(defn parse-bot [ln]
+  (let [[m bot destL idL destH idH]
+        (re-find #"^\s*bot (\d+)[^\d]*(bot|output) (\d+)[^\d]*(bot|output) (\d+)" ln)]
+    (if m
+      (make-bot (read-string bot) destL (read-string bot) destH (read-string idH)))))
+
+
+(defn do-gives [a gs]
+  (if (empty? gs) a
+    (let [[id val] (first gs)]
+      (give! a id val)
+      (recur a (rest gs)))))
+  
+
+
+(defn run-bots [bots vals outs result]
+  (let [all (map (fn [b] (b vals outs)) bots)          ; run each bot
+        trues (filter boolean all)                      ; get active ones
+        res (filter #(not (identical? true %)) trues)  ; remove non result ones
+        rst (if (= (count res) 1) (first res) result)] ; grab reesult
+    (if (empty? trues) rst                             ; return result
+      (recur bots vals outs rst))))                    ; keep going
+
+
+(defn run-day10 [inp size]
+  (let [outs (init-vals [] size)
+        lns (map str/trim (str/split inp #"\n"))
+        gives (filter some? (map parse-val lns))
+        bots (filter some? (map parse-bot lns))
+        vals (do-gives (init-vals [] size) gives)]
+    
+    (run-bots bots vals outs -1)))
+    
+        
+(def gs (run-day10 inp 5)) ; increase size and change result check in make-bot for actual test
+                           ; this should be done dynamically, I know...
+
+gs
+
+(test/is (= gs 2))         ; also change accordingly
+
+
+
+
+
+
+
+
+(defn -main []
+  (println "Hello, Day 1, 4, 10!"))
